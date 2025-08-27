@@ -13,6 +13,8 @@ zephyr_include_directories(.)
 
 zephyr_sources(soc.c)
 
+zephyr_sources_ifdef(CONFIG_MFD_PCA9422	pmic_int.c)
+
 if(CONFIG_FLASH_MCUX_XSPI_XIP)
   zephyr_sources(flash_clock_setup.c)
   zephyr_code_relocate(FILES flash_clock_setup.c LOCATION ${CONFIG_FLASH_MCUX_XSPI_XIP_MEM}_TEXT)
