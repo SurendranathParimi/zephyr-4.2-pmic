@@ -4,5 +4,9 @@
 config ZEPHYR_LITTLEFS_MODULE
 	bool
 
+config LFS_LOG_REGISTER
+    bool "Enable LittleFS log module registration"
+    default y
+
 # Configuration of LittleFS is found in subsys/fs/Kconfig.littlefs for historic
 # reasons.
