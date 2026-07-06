@@ -118,6 +118,6 @@
 
 /* time constants in ms */
 #define SSD1306_RESET_DELAY			1
-#define SSD1306_SUPPLY_DELAY			20
+#define SSD1306_SUPPLY_DELAY			100
 
 #endif
