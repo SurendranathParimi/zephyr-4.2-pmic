@@ -357,6 +357,64 @@ static int ssd1306_write(const struct device *dev, const uint16_t x, const uint1
 	return ssd1306_write_default(dev, x, y, desc, buf, buf_len);
 }
 
+static int ssd1306_clear_gddram(const struct device *dev)
+{
+	const struct ssd1306_config *config = dev->config;
+	uint8_t zero_buf[16] = {0};
+
+	if (config->sh1106_compatible) {
+		for (uint8_t page = 0; page < (config->height / 8); page++) {
+			uint8_t cmd_buf[] = {
+				SSD1306_SET_LOWER_COL_ADDRESS |
+					(config->segment_offset & SSD1306_SET_LOWER_COL_ADDRESS_MASK),
+				SSD1306_SET_HIGHER_COL_ADDRESS |
+					((config->segment_offset >> 4) & SSD1306_SET_LOWER_COL_ADDRESS_MASK),
+				SSD1306_SET_PAGE_START_ADDRESS | page
+			};
+
+			if (ssd1306_write_bus(dev, cmd_buf, sizeof(cmd_buf), true)) {
+				return -EIO;
+			}
+
+			for (uint16_t col = 0; col < config->width; col += sizeof(zero_buf)) {
+				size_t chunk = MIN(sizeof(zero_buf), config->width - col);
+
+				if (ssd1306_write_bus(dev, zero_buf, chunk, false)) {
+					return -EIO;
+				}
+			}
+		}
+
+		return 0;
+	}
+
+	uint8_t cmd_buf[] = {
+		SSD1306_SET_MEM_ADDRESSING_MODE,
+		SSD1306_ADDRESSING_MODE,
+		SSD1306_SET_COLUMN_ADDRESS,
+		config->segment_offset,
+		config->segment_offset + config->width - 1,
+		SSD1306_SET_PAGE_ADDRESS,
+		0,
+		(config->height / 8) - 1
+	};
+
+	if (ssd1306_write_bus(dev, cmd_buf, sizeof(cmd_buf), true)) {
+		return -EIO;
+	}
+
+	for (uint16_t bytes = 0; bytes < (config->width * config->height / 8);
+	     bytes += sizeof(zero_buf)) {
+		size_t chunk = MIN(sizeof(zero_buf), (config->width * config->height / 8) - bytes);
+
+		if (ssd1306_write_bus(dev, zero_buf, chunk, false)) {
+			return -EIO;
+		}
+	}
+
+	return 0;
+}
+
 static int ssd1306_set_contrast(const struct device *dev, const uint8_t contrast)
 {
 	uint8_t cmd_buf[] = {
@@ -465,6 +523,10 @@ static int ssd1306_init_device(const struct device *dev)
 	}
 
 	if (ssd1306_write_bus(dev, cmd_buf, sizeof(cmd_buf), true)) {
+		return -EIO;
+	}
+
+	if (ssd1306_clear_gddram(dev)) {
 		return -EIO;
 	}
 
