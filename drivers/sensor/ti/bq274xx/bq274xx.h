@@ -88,6 +88,7 @@ struct bq274xx_regs {
 struct bq274xx_data {
 	const struct bq274xx_regs *regs;
 	bool configured;
+	bool skip_dt_state_config;
 	uint16_t voltage;
 	int16_t avg_current;
 	int16_t stdby_current;
