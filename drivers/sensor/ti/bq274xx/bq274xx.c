@@ -393,9 +393,6 @@ static int bq274xx_gauge_configure(const struct device *dev)
 	struct bq274xx_data *data = dev->data;
 	const struct bq274xx_regs *regs;
 	int ret;
-	uint16_t designenergy_mwh, taperrate;
-	uint8_t block[BQ27XXX_DM_SZ];
-	bool block_modified = false;
 	uint16_t id;
 
 	if (data->regs == NULL) {
@@ -422,10 +419,6 @@ static int bq274xx_gauge_configure(const struct device *dev)
 	}
 	regs = data->regs;
 
-	designenergy_mwh = (uint32_t)config->design_capacity *
-					((uint32_t)config->design_voltage) / 1000;
-	taperrate = config->design_capacity * 10 / config->taper_current;
-
 	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_A);
 	if (ret < 0) {
 		LOG_ERR("Unable to unseal the battery");
@@ -449,48 +442,69 @@ static int bq274xx_gauge_configure(const struct device *dev)
 		return -EIO;
 	}
 
-	ret = bq274xx_read_block(dev, BQ274XX_SUBCLASS_82, block, sizeof(block));
-	if (ret < 0) {
-		return ret;
-	}
+	/* Boards that configure Subclass 82 themselves (e.g. by writing a
+	 * manufacturer Golden Image over I2C) set zephyr,skip-dt-state-config
+	 * in devicetree to opt out of this devicetree-derived recompute -
+	 * everything else below still runs unconditionally, same as before.
+	 */
+	if (!config->skip_dt_state_config) {
+		uint16_t designenergy_mwh, taperrate;
+		uint8_t block[BQ27XXX_DM_SZ];
+		bool block_modified = false;
 
-	bq274xx_update_block(block,
-			     regs->dm_design_capacity, config->design_capacity,
-			     &block_modified);
-	bq274xx_update_block(block,
-			     regs->dm_design_energy, designenergy_mwh,
-			     &block_modified);
-	bq274xx_update_block(block,
-			     regs->dm_terminate_voltage, config->terminate_voltage,
-			     &block_modified);
-	bq274xx_update_block(block,
-			     regs->dm_taper_rate, taperrate,
-			     &block_modified);
+		designenergy_mwh = (uint32_t)config->design_capacity *
+						((uint32_t)config->design_voltage) / 1000;
+		taperrate = config->design_capacity * 10 / config->taper_current;
 
-	if (block_modified) {
-		LOG_INF("bq274xx: updating fuel gauge parameters");
-
-		ret = bq274xx_write_block(dev, block, sizeof(block));
+		ret = bq274xx_read_block(dev, BQ274XX_SUBCLASS_82, block, sizeof(block));
 		if (ret < 0) {
 			return ret;
 		}
 
-		if (data->regs == &bq27427_regs) {
-			ret = bq27427_ccgain_quirk(dev);
+		bq274xx_update_block(block,
+				     regs->dm_design_capacity, config->design_capacity,
+				     &block_modified);
+		bq274xx_update_block(block,
+				     regs->dm_design_energy, designenergy_mwh,
+				     &block_modified);
+		bq274xx_update_block(block,
+				     regs->dm_terminate_voltage, config->terminate_voltage,
+				     &block_modified);
+		bq274xx_update_block(block,
+				     regs->dm_taper_rate, taperrate,
+				     &block_modified);
+
+		if (block_modified) {
+			LOG_INF("bq274xx: updating fuel gauge parameters");
+
+			ret = bq274xx_write_block(dev, block, sizeof(block));
 			if (ret < 0) {
 				return ret;
 			}
 		}
+	}
 
-		ret = bq274xx_ensure_chemistry(dev);
+	/* Previously nested inside "if (block_modified)", which under normal
+	 * operation meant these only ran as a side effect of Subclass 82
+	 * happening to differ. They don't depend on that at all - the CC Gain
+	 * erratum, the chemistry ID, and exiting CONFIG UPDATE (entered
+	 * unconditionally above) all need to happen every time regardless.
+	 */
+	if (data->regs == &bq27427_regs) {
+		ret = bq27427_ccgain_quirk(dev);
 		if (ret < 0) {
 			return ret;
 		}
+	}
 
-		ret = bq274xx_mode_cfgupdate(dev, false);
-		if (ret < 0) {
-			return ret;
-		}
+	ret = bq274xx_ensure_chemistry(dev);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = bq274xx_mode_cfgupdate(dev, false);
+	if (ret < 0) {
+		return ret;
 	}
 
 	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_SEALED);
@@ -880,6 +894,8 @@ static DEVICE_API(sensor, bq274xx_battery_driver_api) = {
 		.terminate_voltage = DT_INST_PROP(index, terminate_voltage),	\
 		.chemistry_id = DT_INST_PROP_OR(index, chemistry_id, 0),			\
 		.lazy_loading = DT_INST_PROP(index, zephyr_lazy_load),		\
+		.skip_dt_state_config =						\
+			DT_INST_PROP(index, zephyr_skip_dt_state_config),	\
 	};									\
 										\
 	PM_BQ274XX_DT_INST_DEFINE(index, bq274xx_pm_action);			\
