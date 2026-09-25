@@ -26,7 +26,6 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/drivers/sensor/bq274xx.h>
 
 #include "bq274xx.h"
 
@@ -443,12 +442,12 @@ static int bq274xx_gauge_configure(const struct device *dev)
 		return -EIO;
 	}
 
-	/* Callers that have already configured Subclass 82 themselves (e.g. by
-	 * writing a manufacturer Golden Image over I2C) can opt out of this
-	 * devicetree-derived recompute via bq274xx_skip_dt_state_config() -
+	/* Boards that configure Subclass 82 themselves (e.g. by writing a
+	 * manufacturer Golden Image over I2C) set zephyr,skip-dt-state-config
+	 * in devicetree to opt out of this devicetree-derived recompute -
 	 * everything else below still runs unconditionally, same as before.
 	 */
-	if (!data->skip_dt_state_config) {
+	if (!config->skip_dt_state_config) {
 		uint16_t designenergy_mwh, taperrate;
 		uint8_t block[BQ27XXX_DM_SZ];
 		bool block_modified = false;
@@ -601,13 +600,6 @@ static int bq274xx_channel_get(const struct device *dev, enum sensor_channel cha
 	}
 
 	return 0;
-}
-
-void bq274xx_skip_dt_state_config(const struct device *dev)
-{
-	struct bq274xx_data *data = dev->data;
-
-	data->skip_dt_state_config = true;
 }
 
 static int bq274xx_sample_fetch(const struct device *dev, enum sensor_channel chan)
@@ -902,6 +894,8 @@ static DEVICE_API(sensor, bq274xx_battery_driver_api) = {
 		.terminate_voltage = DT_INST_PROP(index, terminate_voltage),	\
 		.chemistry_id = DT_INST_PROP_OR(index, chemistry_id, 0),			\
 		.lazy_loading = DT_INST_PROP(index, zephyr_lazy_load),		\
+		.skip_dt_state_config =						\
+			DT_INST_PROP(index, zephyr_skip_dt_state_config),	\
 	};									\
 										\
 	PM_BQ274XX_DT_INST_DEFINE(index, bq274xx_pm_action);			\

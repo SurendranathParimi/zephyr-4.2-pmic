@@ -56,3 +56,19 @@ properties:
     description: |
       Configuring the sensor can take a long time, using lazy loading we can delay
       until the first sample request and keep the boot time as short as possible.
+
+  zephyr,skip-dt-state-config:
+    type: boolean
+    description: |
+      Skip recomputing Subclass 82 ("State": design_capacity/design_energy/
+      terminate_voltage/taper_rate) from design-voltage/design-capacity/
+      taper-current/terminate-voltage on the first sample fetch. Set this
+      when Subclass 82 is instead configured by writing a full Golden Image
+      to the gauge outside this driver (e.g. a manufacturer-provided
+      flashstream), so this driver's devicetree-derived recompute doesn't
+      overwrite it.
+
+      When set, design-voltage/design-capacity/taper-current/
+      terminate-voltage are not used by this driver at all - since they are
+      still required properties of this binding, set them to 0 to make that
+      explicit.
