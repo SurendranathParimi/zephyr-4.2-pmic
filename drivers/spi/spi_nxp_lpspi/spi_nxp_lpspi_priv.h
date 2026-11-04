@@ -43,6 +43,7 @@ struct lpspi_config {
 	const struct pinctrl_dev_config *pincfg;
 	uint8_t data_pin_config;
 	bool tristate_output;
+	bool delayed_sampling;
 	uint8_t tx_fifo_size;
 	uint8_t rx_fifo_size;
 	uint8_t irqn;
@@ -119,6 +120,7 @@ int lpspi_wait_tx_fifo_empty(const struct device *dev);
 		.pincfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),                                       \
 		.data_pin_config = (uint8_t)DT_INST_ENUM_IDX(n, data_pin_config),                  \
 		.tristate_output = DT_INST_PROP(n, tristate_output),                               \
+		.delayed_sampling = DT_INST_PROP(n, delayed_sampling),                             \
 		.rx_fifo_size = (uint8_t)DT_INST_PROP(n, rx_fifo_size),                            \
 		.tx_fifo_size = (uint8_t)DT_INST_PROP(n, tx_fifo_size),                            \
 		.irqn = (uint8_t)LPSPI_IRQN(n),                                                    \
