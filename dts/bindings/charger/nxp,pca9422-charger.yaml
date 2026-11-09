@@ -131,6 +131,46 @@ properties:
       has a shared cold/hot hardware disable bit; if only this property is set,
       the driver handles hot-only disable in software.
 
+  fast-charge-safety-timer-hours:
+    type: int
+    enum:
+      - 0
+      - 3
+      - 5
+      - 7
+    description: |
+      Fast charge safety timer in hours. 0 disables the timer. Maps to the
+      FAST_CHG_TIMER field of CHARGER_CNTL_7. If omitted, the register is left
+      at its reset value (3 hours).
+
+  precharge-safety-timer-minutes:
+    type: int
+    enum:
+      - 0
+      - 15
+      - 30
+      - 60
+    description: |
+      Pre-charge safety timer in minutes. 0 disables the timer. Maps to the
+      PRE_CHG_TIMER field of CHARGER_CNTL_4. If omitted, the register is left
+      at its reset value (30 minutes).
+
+  top-off-timer-minutes:
+    type: int
+    enum:
+      - 0
+      - 5
+      - 10
+      - 15
+      - 20
+      - 25
+      - 30
+      - 35
+    description: |
+      Top-off safety timer in minutes. 0 disables the timer and skips top-off
+      mode. Maps to the TOP_OFF_TIMER field of CHARGER_CNTL_8. If omitted, the
+      register is left at its reset value (5 minutes).
+
   constant-charge-voltage-max-microvolt:
     type: int
     required: true
