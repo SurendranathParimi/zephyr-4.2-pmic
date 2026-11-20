@@ -57,6 +57,20 @@ enum {
 	MT25QU_CMD_CHIP_ERASE           = 13, /* seq13 - Chip Erase (0x60)             */
 };
 
+enum {
+	W25Q128_CMD_MEM_READ = 0,          /* seq0  - Quad I/O Fast Read (0xEB)     */
+	W25Q128_CMD_READ_STATUS = 1,       /* seq1  - Read Status Register (0x05)   */
+	W25Q128_CMD_READ_STATUS_OPI = 2,   /* seq2  - unused (OPI not applicable for QSPI device) */
+	W25Q128_CMD_WRITE_ENABLE = 3,      /* seq3  - Write Enable (0x06)           */
+	W25Q128_CMD_WRITE_ENABLE_OPI = 4,  /* seq4  - unused (OPI not applicable for QSPI device) */
+	W25Q128_CMD_ERASE_SECTOR = 5,      /* seq5  - 4KB Subsector Erase (0x20)    */
+	W25Q128_CMD_ERASE_BLOCK = 8,       /* seq8  - 64KB Block Erase (0xD8)       */
+	W25Q128_CMD_WRITE_ENABLE_JUMP = 9, /* seq9  - Write Enable + JUMP_TO_CMD(2) */
+	W25Q128_CMD_PAGEPROGRAM_SPI = 10,  /* seq10 - Page Program SPI (0x02)       */
+	W25Q128_CMD_ENABLE_QUAD = 11,      /* seq11 - Enable Quad mode (no validated table entry) */
+	W25Q128_CMD_CHIP_ERASE = 13,       /* seq13 - Chip Erase (0x60)             */
+};
+
 struct flash_mcux_xspi_config {
 	bool enable_differential_clk;
 	xspi_sample_clk_config_t sample_clk_config;
@@ -307,6 +321,53 @@ static const uint32_t flash_xspi_lut[][5] = {
 				 kXSPI_8PAD, 0x8),
 	}};
 
+static const uint32_t flash_xspi_w25q128_lut[][5] = {
+	[W25Q128_CMD_MEM_READ] =
+		{
+			XSPI_LUT_SEQ(kXSPI_Command_SDR, kXSPI_1PAD, 0xEB, kXSPI_Command_RADDR_SDR,
+				     kXSPI_4PAD, 0x18),
+			XSPI_LUT_SEQ(kXSPI_Command_MODE_SDR, kXSPI_4PAD, 0xFF,
+				     kXSPI_Command_DUMMY_SDR, kXSPI_4PAD, 0x04),
+			XSPI_LUT_SEQ(kXSPI_Command_READ_SDR, kXSPI_4PAD, 0x08, kXSPI_Command_STOP,
+				     kXSPI_1PAD, 0x00),
+		},
+	[W25Q128_CMD_READ_STATUS] =
+		{
+			XSPI_LUT_SEQ(kXSPI_Command_SDR, kXSPI_1PAD, 0x05, kXSPI_Command_READ_SDR,
+				     kXSPI_1PAD, 0x08),
+		},
+	[W25Q128_CMD_WRITE_ENABLE] =
+		{
+			XSPI_LUT_SEQ(kXSPI_Command_SDR, kXSPI_1PAD, 0x06, kXSPI_Command_STOP,
+				     kXSPI_1PAD, 0x0),
+		},
+	[W25Q128_CMD_ERASE_SECTOR] =
+		{
+			XSPI_LUT_SEQ(kXSPI_Command_SDR, kXSPI_1PAD, 0x20, kXSPI_Command_RADDR_SDR,
+				     kXSPI_1PAD, 0x18),
+		},
+	[W25Q128_CMD_ERASE_BLOCK] =
+		{
+			XSPI_LUT_SEQ(kXSPI_Command_SDR, kXSPI_1PAD, 0xD8, kXSPI_Command_RADDR_SDR,
+				     kXSPI_1PAD, 0x18),
+		},
+	[W25Q128_CMD_WRITE_ENABLE_JUMP] =
+		{
+			XSPI_LUT_SEQ(kXSPI_Command_SDR, kXSPI_1PAD, 0x06, kXSPI_Command_JUMP_TO_SEQ,
+				     kXSPI_1PAD, 0x02),
+		},
+	[W25Q128_CMD_PAGEPROGRAM_SPI] =
+		{
+			XSPI_LUT_SEQ(kXSPI_Command_SDR, kXSPI_1PAD, 0x12, kXSPI_Command_RADDR_SDR,
+				     kXSPI_1PAD, 0x18),
+			XSPI_LUT_SEQ(kXSPI_Command_WRITE_SDR, kXSPI_1PAD, 0x04, kXSPI_Command_STOP,
+				     kXSPI_1PAD, 0x0),
+		},
+	[W25Q128_CMD_CHIP_ERASE] = {
+		XSPI_LUT_SEQ(kXSPI_Command_SDR, kXSPI_1PAD, 0x60, kXSPI_Command_STOP, kXSPI_1PAD,
+			     0x00),
+	}};
+
 /* Memory devices table. */
 static struct memc_xspi_dev_config device_configs[] = {
 	{
@@ -355,6 +416,30 @@ static struct memc_xspi_dev_config device_configs[] = {
                 .lut_count = FLASH_MCUX_XSPI_LUT_ARRAY_SIZE(flash_xspi_mt25qu_lut),
                 .is_opi = false,
         },
+		{
+		.name_prefix = "w25q128jwbiq",
+		.xspi_dev_config =
+			{
+				.deviceInterface = kXSPI_StrandardExtendedSPI,
+				.interfaceSettings.strandardExtendedSPISettings.pageSize = 256,
+				.CSHoldTime = 3,
+				.CSSetupTime = 3,
+				.addrMode = kXSPI_DeviceByteAddressable,
+				.columnAddrWidth = 0,
+				.enableCASInterleaving = false,
+				.ptrDeviceDdrConfig =
+					&(xspi_device_ddr_config_t){
+						.ddrDataAlignedClk =
+							kXSPI_DDRDataAlignedWith2xInternalRefClk,
+						.enableByteSwapInOctalMode = false,
+						.enableDdr = false, /* SDR, not DDR */
+					},
+				.deviceSize = {16 * 1024, 0},
+			},
+		.lut_array = &flash_xspi_w25q128_lut[0][0],
+		.lut_count = FLASH_MCUX_XSPI_LUT_ARRAY_SIZE(flash_xspi_w25q128_lut),
+		.is_opi = false,
+	},
 };
 
 static int flash_xspi_nor_wait_bus_busy(const struct device *dev, bool enableOctal)
