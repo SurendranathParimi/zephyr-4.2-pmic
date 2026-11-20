@@ -73,6 +73,7 @@ struct spi_nxp_dma_data {
 static void spi_mcux_issue_TCR(const struct device *dev)
 {
 	LPSPI_Type *base = (LPSPI_Type *)DEVICE_MMIO_NAMED_GET(dev, reg_base);
+	const struct lpspi_config *config = DEV_CFG(dev);
 	const struct spi_config *spi_cfg = DEV_DATA(dev)->ctx.config;
 	uint8_t major_ver = (base->VERID & LPSPI_VERID_MAJOR_MASK) >> LPSPI_VERID_MAJOR_SHIFT;
 
@@ -80,8 +81,45 @@ static void spi_mcux_issue_TCR(const struct device *dev)
 	 * On a newer LPSPI version, only issue TCR when hold on CS feature is disabled.
 	 */
 	if (major_ver < 2 || !(spi_cfg->operation & SPI_HOLD_ON_CS)) {
+		/* The TCR write is queued in the TX FIFO and is dropped while the FIFO is full,
+		 * which a non-zero TX watermark allows when the TX DMA completes. Wait for the
+		 * shifter to free a slot, at most one frame time.
+		 */
+		while (((base->FSR & LPSPI_FSR_TXCOUNT_MASK) >> LPSPI_FSR_TXCOUNT_SHIFT) >=
+		       config->tx_fifo_size) {
+		}
 		base->TCR &= ~LPSPI_TCR_CONTC_MASK;
 	}
+}
+
+/* Bytes the DMA moves per LPSPI frame, which is also the TDR/RDR access width */
+static uint8_t lpspi_dma_width(const struct spi_config *spi_cfg)
+{
+	uint32_t word_size = SPI_WORD_SIZE_GET(spi_cfg->operation);
+
+	if (word_size > 16U) {
+		return 4U;
+	}
+	if (word_size > 8U) {
+		return 2U;
+	}
+	return 1U;
+}
+
+/* The DMA needs every buffer aligned to, and sized in, whole frames */
+static bool lpspi_dma_bufs_valid(const struct spi_buf_set *bufs, uint8_t width)
+{
+	if (bufs == NULL) {
+		return true;
+	}
+
+	for (size_t i = 0; i < bufs->count; i++) {
+		if ((bufs->buffers[i].len % width) != 0U ||
+		    ((uintptr_t)bufs->buffers[i].buf % width) != 0U) {
+			return false;
+		}
+	}
+	return true;
 }
 
 static struct dma_block_config *lpspi_dma_common_load(struct spi_dma_stream *stream,
@@ -89,12 +127,16 @@ static struct dma_block_config *lpspi_dma_common_load(struct spi_dma_stream *str
 						      size_t len)
 {
 	struct dma_block_config *blk_cfg = &stream->dma_blk_cfg;
+	uint8_t width = lpspi_dma_width(DEV_DATA(dev)->ctx.config);
 
 	memset(blk_cfg, 0, sizeof(struct dma_block_config));
 
 	blk_cfg->block_size = len;
 
-	stream->dma_cfg.source_burst_length = 1;
+	/* One frame per DMA request */
+	stream->dma_cfg.source_data_size = width;
+	stream->dma_cfg.dest_data_size = width;
+	stream->dma_cfg.source_burst_length = width;
 	stream->dma_cfg.user_data = (void *)dev;
 	stream->dma_cfg.head_block = blk_cfg;
 
@@ -275,6 +317,21 @@ static void lpspi_dma_callback(const struct device *dev, void *arg, uint32_t cha
 
 	case LPSPI_TRANSFER_STATE_TX_DONE:
 	case LPSPI_TRANSFER_STATE_RX_DONE:
+		/* The second channel to finish lands here, not in the ONGOING end-of-transfer
+		 * branch, so stop it here too. TX can finish after RX when both DMA
+		 * interrupts are pending at once (RX has the lower IRQ number), and the TCR
+		 * must still be issued then, or PCS stays asserted.
+		 */
+		ret = dma_stop(dev, channel);
+		if (ret != 0) {
+			goto error;
+		}
+		if (channel == dma_data->dma_tx.channel) {
+			spi_mcux_issue_TCR(spi_dev);
+			base->DER &= ~LPSPI_DER_TDDE_MASK;
+		} else {
+			base->DER &= ~LPSPI_DER_RDDE_MASK;
+		}
 		dma_data->state = LPSPI_TRANSFER_STATE_RX_TX_DONE;
 		/* TX and RX both done here. */
 		spi_context_complete(ctx, spi_dev, 0);
@@ -300,13 +357,22 @@ static int transceive_dma(const struct device *dev, const struct spi_config *spi
 			  bool asynchronous, spi_callback_t cb, void *userdata)
 {
 	LPSPI_Type *base = (LPSPI_Type *)DEVICE_MMIO_NAMED_GET(dev, reg_base);
+	const struct lpspi_config *config = dev->config;
 	struct lpspi_data *data = dev->data;
 	struct spi_nxp_dma_data *dma_data = (struct spi_nxp_dma_data *)data->driver_data;
 	struct spi_context *ctx = &data->ctx;
 	uint8_t major_ver = (base->VERID & LPSPI_VERID_MAJOR_MASK) >> LPSPI_VERID_MAJOR_SHIFT;
+	uint8_t width = lpspi_dma_width(spi_cfg);
+	uint8_t tx_water = 0;
 	int ret;
 
 	spi_context_lock(ctx, asynchronous, cb, userdata, spi_cfg);
+
+	if (!lpspi_dma_bufs_valid(tx_bufs, width) || !lpspi_dma_bufs_valid(rx_bufs, width)) {
+		LOG_ERR("SPI buffers must be aligned to and sized in %u byte frames", width);
+		ret = -EINVAL;
+		goto out;
+	}
 
 	ret = lpspi_configure(dev, spi_cfg);
 	if (ret) {
@@ -322,12 +388,19 @@ static int transceive_dma(const struct device *dev, const struct spi_config *spi
 	/* Always use continuous mode to satisfy SPI API requirements. */
 	base->TCR |= LPSPI_TCR_CONT_MASK | LPSPI_TCR_CONTC_MASK;
 
-	/* Please set both watermarks as 0 because there are some synchronize requirements
-	 * between RX and TX on RT platform. TX and RX DMA callback must be called in interleaved
-	 * mode, a none-zero TX watermark may break this.
-	 */
-	base->FCR = LPSPI_FCR_TXWATER(0) | LPSPI_FCR_RXWATER(0);
 	spi_context_buffers_setup(&data->ctx, tx_bufs, rx_bufs, 1);
+
+	/* A transfer of several DMA blocks needs both watermarks at 0: there are some synchronize
+	 * requirements between RX and TX on RT platform, the TX and RX DMA callbacks must be
+	 * called in interleaved mode, and a non-zero TX watermark may break this. A single block
+	 * has nothing to interleave, so let the TX FIFO fill up and absorb the DMA latency, which
+	 * keeps SCK running without gaps between frames.
+	 */
+	if (spi_context_max_continuous_chunk(ctx) ==
+	    MAX(spi_context_total_tx_len(ctx), spi_context_total_rx_len(ctx))) {
+		tx_water = config->tx_fifo_size - 1U;
+	}
+	base->FCR = LPSPI_FCR_TXWATER(tx_water) | LPSPI_FCR_RXWATER(0);
 
 	/* Set next dma size is invalid. */
 	dma_data->synchronize_dma_size = 0;

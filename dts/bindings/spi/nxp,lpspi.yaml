@@ -54,6 +54,13 @@ properties:
       (when PCS is negated). If set, the output will be tristated when PCS is negated,
       otherwise the output line retains the last value when PCS is negated.
 
+  delayed-sampling:
+    type: boolean
+    description:
+      Configures the master to sample input data on a delayed SCK edge instead of the
+      SCK edge itself. This gives a slow peripheral output more time to settle at high
+      SCK frequencies.
+
   rx-fifo-size:
     type: int
     required: true

@@ -273,6 +273,10 @@ static void lpspi_basic_config(const struct device *dev, const struct spi_config
 		cfgr1_val |= LPSPI_CFGR1_OUTCFG_MASK;
 	}
 
+	if (config->delayed_sampling) {
+		cfgr1_val |= LPSPI_CFGR1_SAMPLE_MASK;
+	}
+
 	cfgr1_val |= config->data_pin_config << LPSPI_CFGR1_PINCFG_SHIFT;
 
 	base->CFGR1 = cfgr1_val;
